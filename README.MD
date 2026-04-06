@@ -1,7 +1,7 @@
 # Go Web Server
 
 ## Project Overview
-A **Go web server learning exercise** with room for improvement. It implements a simple RESTful API for user management with an in-memory database.
+A **Go web server learning exercise** with room for improvement. It implements a simple RESTful API for user management with an in-memory database. To ensure a deep understanding of Go's syntax and standard library, WebServers, this project is being developed without the use of AI assistance.
 
 ## Architecture
 - **Database**: In-memory cache (`userCache` map) storing User objects
