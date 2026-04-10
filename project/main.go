@@ -24,7 +24,6 @@ func main() {
 	var err error
 
 	// String de conexão: "usuario:senha@tcp(host:porta)/nomedobanco"
-	// Lembre que sua porta é a 3307!
 	connStr := "root:123456@tcp(127.0.0.1:3307)/users_db"
 
 	db, err = sql.Open("mysql", connStr)
