@@ -2,11 +2,14 @@ package main
 
 /* Este projeto tem o intuito de praticar a criação de um web server em golang com abertura para aprimoramento */
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
-	"sync"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // definindo uma "table" no nosso "banco"
@@ -14,13 +17,28 @@ type User struct {
 	Name string `json:"name"`
 }
 
-// Definindo um "banco"
-var userCache = make(map[int]User)
-
-// Mutex para fazer o request thread safe
-var cacheMutex sync.RWMutex
+// o objeto sql.DB já é thread-safe por natureza
+var db *sql.DB
 
 func main() {
+	var err error
+
+	// String de conexão: "usuario:senha@tcp(host:porta)/nomedobanco"
+	connStr := "root:123456@tcp(127.0.0.1:3307)/users_db"
+
+	db, err = sql.Open("mysql", connStr)
+	if err != nil {
+		log.Fatal("Erro checando driver de conexão: ", err)
+	}
+	// O Open() não conecta na hora, ele só "abre" as configurações.
+	// O Ping() de fato força a comunicação real com o Docker!
+	err = db.Ping()
+	if err != nil {
+		log.Fatal("Não foi possível alcançar o MySQL: ", err)
+	}
+
+	fmt.Println("Conexão com MySQL estabelecida com sucesso!")
+
 	//Definimos um router
 	mux := http.NewServeMux()
 
@@ -76,9 +94,23 @@ func createUser(
 		return
 	}
 
-	cacheMutex.Lock()
-	userCache[len(userCache)+1] = user
-	cacheMutex.Unlock()
+	// colocamos o ? para previnir SQL Injection
+	query := "INSERT INTO users (name) VALUES (?)"
+
+	result, err := db.Exec(query, user.Name)
+
+	if err != nil {
+		http.Error(
+			w,
+			"Erro ao salvar no banco"+err.Error(),
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	//Vamos pegar o ID gerado pelo auto increment
+	id, _ := result.LastInsertId()
+	fmt.Printf("Usuário adicionado no banco com o id: %d\n", id)
 
 	w.WriteHeader(http.StatusNoContent)
 
@@ -97,15 +129,24 @@ func getUser(
 		)
 		return
 	}
-	cacheMutex.RLock()
-	user, ok := userCache[id]
-	cacheMutex.RUnlock()
 
-	if !ok {
+	var user User
+	query := "SELECT name FROM users WHERE id = ?"
+	err = db.QueryRow(query, id).Scan(&user.Name)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(
+				w,
+				"user not found",
+				http.StatusNotFound,
+			)
+			return
+		}
 		http.Error(
 			w,
-			"user not found",
-			http.StatusNotFound,
+			"Erro ao buscar do banco: "+err.Error(),
+			http.StatusInternalServerError,
 		)
 		return
 	}
@@ -123,7 +164,6 @@ func getUser(
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(j)
-
 }
 
 func deleteUser(
@@ -140,18 +180,29 @@ func deleteUser(
 		return
 	}
 
-	if _, ok := userCache[id]; !ok {
+	// colocamos o ? para previnir SQL Injection
+	query := "DELETE FROM users WHERE id = ?"
+
+	result, err := db.Exec(query, id)
+
+	if err != nil {
 		http.Error(
 			w,
-			"user not found",
-			http.StatusBadRequest,
+			"Erro ao salvar do banco"+err.Error(),
+			http.StatusInternalServerError,
 		)
 		return
 	}
 
-	cacheMutex.Lock()
-	delete(userCache, id)
-	cacheMutex.Unlock()
+	// O método RowsAffected() nos diz quantas linhas o banco apagou de fato
+	linhasDeletadas, _ := result.RowsAffected()
+
+	if linhasDeletadas == 0 {
+		http.Error(w, "Usuário não encontrado no banco", http.StatusNotFound)
+		return
+	}
+
+	fmt.Printf("Usuário ID %d deletado com sucesso.\n", id)
 
 	w.WriteHeader(http.StatusNoContent)
 }
